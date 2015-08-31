@@ -33,7 +33,11 @@ namespace AngularJSAuthentication.API.Controllers
             _repo = new AuthRepository();
         }
 
-        // POST api/Account/Register
+        /// <summary>
+        /// 註冊 Account
+        /// </summary>
+        /// <param name="userDto"></param>
+        /// <returns></returns>
         [AllowAnonymous]
         [Route("Register")]
         public async Task<IHttpActionResult> Register(UserModel userModel)
@@ -55,7 +59,12 @@ namespace AngularJSAuthentication.API.Controllers
              return Ok();
         }
 
-        // GET api/Account/ExternalLogin
+        /// <summary>
+        /// 取得外部登入連結與導向
+        /// </summary>
+        /// <param name="provider"></param>
+        /// <param name="error"></param>
+        /// <returns></returns>
         [OverrideAuthentication]
         [HostAuthentication(DefaultAuthenticationTypes.ExternalCookie)]
         [AllowAnonymous]
@@ -69,18 +78,24 @@ namespace AngularJSAuthentication.API.Controllers
                 return BadRequest(Uri.EscapeDataString(error));
             }
 
+            //帳號沒有被驗證過
             if (!User.Identity.IsAuthenticated)
             {
                 return new ChallengeResult(provider, this);
             }
 
+            //通過 Google , FB 驗證會到此行 
+            //( 也就是說此 Action 會被執行兩次，第一次是尚未驗證，第二次是進行驗證後，驗證完後，Google 會導向回此網址 )
+            //驗證導向結果
             var redirectUriValidationResult = ValidateClientAndRedirectUri(this.Request, ref redirectUri);
 
+            //不是空，代表有錯誤
             if (!string.IsNullOrWhiteSpace(redirectUriValidationResult))
             {
                 return BadRequest(redirectUriValidationResult);
             }
 
+            //準備要寫入 DB 的 LoginData
             ExternalLoginData externalLogin = ExternalLoginData.FromIdentity(User.Identity as ClaimsIdentity);
 
             if (externalLogin == null)
@@ -88,12 +103,14 @@ namespace AngularJSAuthentication.API.Controllers
                 return InternalServerError();
             }
 
+            //如果provider不同，則進入
             if (externalLogin.LoginProvider != provider)
             {
                 Authentication.SignOut(DefaultAuthenticationTypes.ExternalCookie);
                 return new ChallengeResult(provider, this);
             }
 
+            //判斷此 User 是否註冊過 ( 檢查 UserLogin，用 LoginProvider (Google) 和 ProviderKey
             IdentityUser user = await _repo.FindAsync(new UserLoginInfo(externalLogin.LoginProvider, externalLogin.ProviderKey));
 
             bool hasRegistered = user != null;
@@ -109,7 +126,11 @@ namespace AngularJSAuthentication.API.Controllers
 
         }
 
-        // POST api/Account/RegisterExternal
+        /// <summary>
+        /// 註冊外部帳號
+        /// </summary>
+        /// <param name="model"></param>
+        /// <returns></returns>
         [AllowAnonymous]
         [Route("RegisterExternal")]
         public async Task<IHttpActionResult> RegisterExternal(RegisterExternalBindingModel model)
@@ -120,6 +141,7 @@ namespace AngularJSAuthentication.API.Controllers
                 return BadRequest(ModelState);
             }
 
+            //因為 這是新的請求， context 已經沒有了，所以要重新和 Google 要使用者資料一次。
             var verifiedAccessToken = await VerifyExternalAccessToken(model.Provider, model.ExternalAccessToken);
             if (verifiedAccessToken == null)
             {
@@ -135,6 +157,7 @@ namespace AngularJSAuthentication.API.Controllers
                 return BadRequest("External user is already registered");
             }
 
+            //建立帳號，但只傳入 UserName .
             user = new IdentityUser() { UserName = model.UserName };
 
             IdentityResult result = await _repo.CreateAsync(user);
@@ -155,12 +178,18 @@ namespace AngularJSAuthentication.API.Controllers
                 return GetErrorResult(result);
             }
 
-            //generate access token response
+            //取得本地端的 Token
             var accessTokenResponse = GenerateLocalAccessTokenResponse(model.UserName);
 
             return Ok(accessTokenResponse);
         }
 
+        /// <summary>
+        /// 取得 LocalAccessToken
+        /// </summary>
+        /// <param name="provider"></param>
+        /// <param name="externalAccessToken"></param>
+        /// <returns></returns>
         [AllowAnonymous]
         [HttpGet]
         [Route("ObtainLocalAccessToken")]
@@ -247,6 +276,7 @@ namespace AngularJSAuthentication.API.Controllers
                 return "redirect_uri is required";
             }
 
+            //驗證網址
             bool validUri = Uri.TryCreate(redirectUriString, UriKind.Absolute, out redirectUri);
 
             if (!validUri)
@@ -254,6 +284,7 @@ namespace AngularJSAuthentication.API.Controllers
                 return "redirect_uri is invalid";
             }
 
+            //取得資料庫匹配的 ClientID ( WebApp )
             var clientId = GetQueryString(Request, "client_id");
 
             if (string.IsNullOrWhiteSpace(clientId))
@@ -261,6 +292,7 @@ namespace AngularJSAuthentication.API.Controllers
                 return "client_Id is required";
             }
 
+            //尋找 DB 是否有 ClientID
             var client = _repo.FindClient(clientId);
 
             if (client == null)
@@ -273,6 +305,7 @@ namespace AngularJSAuthentication.API.Controllers
                 return string.Format("The given URL is not allowed by Client_id '{0}' configuration.", clientId);
             }
 
+            //redirectUriOutput 是 ref ，所以return empty
             redirectUriOutput = redirectUri.AbsoluteUri;
 
             return string.Empty;
@@ -281,10 +314,12 @@ namespace AngularJSAuthentication.API.Controllers
 
         private string GetQueryString(HttpRequestMessage request, string key)
         {
+            //取得 URL 參數
             var queryStrings = request.GetQueryNameValuePairs();
 
             if (queryStrings == null) return null;
 
+            //在第一次登入的時候會尋找 Redirect_url 的參數 , 第二次取得 CLIENT ID
             var match = queryStrings.FirstOrDefault(keyValue => string.Compare(keyValue.Key, key, true) == 0);
 
             if (string.IsNullOrEmpty(match.Value)) return null;
@@ -292,6 +327,12 @@ namespace AngularJSAuthentication.API.Controllers
             return match.Value;
         }
 
+        /// <summary>
+        /// 驗證外部帳號
+        /// </summary>
+        /// <param name="provider"></param>
+        /// <param name="accessToken"></param>
+        /// <returns></returns>
         private async Task<ParsedExternalAccessToken> VerifyExternalAccessToken(string provider, string accessToken)
         {
             ParsedExternalAccessToken parsedToken = null;
@@ -401,6 +442,7 @@ namespace AngularJSAuthentication.API.Controllers
 
                 Claim providerKeyClaim = identity.FindFirst(ClaimTypes.NameIdentifier);
 
+                //判斷 Issuer 是否為 Local Authority ( 這邊的Issuer為 Google, FB )
                 if (providerKeyClaim == null || String.IsNullOrEmpty(providerKeyClaim.Issuer) || String.IsNullOrEmpty(providerKeyClaim.Value))
                 {
                     return null;
@@ -411,6 +453,7 @@ namespace AngularJSAuthentication.API.Controllers
                     return null;
                 }
 
+                //傳回要準備寫入 UserLogin DB 的資訊
                 return new ExternalLoginData
                 {
                     LoginProvider = providerKeyClaim.Issuer,
