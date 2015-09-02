@@ -109,6 +109,7 @@ app.factory('authService', ['$http', '$q', 'localStorageService', 'ngAuthSetting
         return deferred.promise;
     };
 
+    //用於 Login 外部帳號
     var _obtainAccessToken = function (externalData) {
 
         var deferred = $q.defer();
@@ -132,6 +133,7 @@ app.factory('authService', ['$http', '$q', 'localStorageService', 'ngAuthSetting
 
     };
 
+    //註冊外部帳號
     var _registerExternal = function (registerExternalData) {
 
         var deferred = $q.defer();
